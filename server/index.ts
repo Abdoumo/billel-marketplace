@@ -89,8 +89,7 @@ export function createServer() {
     try {
       const redisClient = new Redis(process.env.REDIS_URL || "redis://127.0.0.1:6379", {
         maxRetriesPerRequest: 1,
-        retryStrategy: () => null, // Do not retry if local redis is down
-        enableOfflineQueue: false // Prevent commands from hanging indefinitely if Redis is not running
+        retryStrategy: () => null // Do not retry if local redis is down
       });
       
       redisClient.on('error', (err) => {
