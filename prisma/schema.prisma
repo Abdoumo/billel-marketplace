@@ -1,0 +1,453 @@
+// This is your Prisma schema file for the Digital Assets & Startup Marketplace
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
+}
+
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["marketplace"]
+}
+
+// ============================================================================
+// Users & Authentication
+// ============================================================================
+
+enum UserRole {
+  @@schema("marketplace")
+  VISITOR
+  SELLER
+  BUYER
+  INVESTOR
+  EXPERT
+  EVALUATION_COMPANY
+  NOTARY
+  LAWYER
+  ADMIN
+}
+
+enum KYCStatus {
+  @@schema("marketplace")
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+model User {
+  @@schema("marketplace")
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  role      UserRole @default(VISITOR)
+
+  // Profile
+  firstName String?
+  lastName  String?
+  phone     String?
+  avatar    String?
+  bio       String?
+
+  // KYC
+  kycStatus     KYCStatus @default(PENDING)
+  kycDocuments  Json?     // Store S3 URLs/metadata
+  kycSubmittedAt DateTime?
+  kycVerifiedAt DateTime?
+
+  // Verification
+  emailVerified    Boolean   @default(false)
+  emailVerifiedAt  DateTime?
+  isVerifiedBadge  Boolean   @default(false)
+
+  // Seller Scoring
+  sellerScore     Float     @default(0)
+  totalTransactions Int     @default(0)
+  successfulDeals Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  // Relationships
+  listings        Listing[]
+  evaluations     Evaluation[]
+  evaluatorReviews EvaluatorReview[]
+  buyerTransactions Transaction[] @relation("buyer")
+  sellerTransactions Transaction[] @relation("seller")
+  favorites       Favorite[]
+  questions       Question[]
+  reports         Report[]
+  notaryProfile   NotaryProfile?
+  lawyerProfile   LawyerProfile?
+  evaluationCompanyProfile EvaluationCompanyProfile?
+
+  @@index([email])
+  @@index([role])
+  @@index([kycStatus])
+}
+
+// ============================================================================
+// Listings (Marketplace Assets)
+// ============================================================================
+
+enum ListingCategory {
+  @@schema("marketplace")
+  STARTUP
+  SHARES
+  DOMAIN
+  PATENT
+  APP
+  SAAS
+  DESIGN
+}
+
+enum AssetState {
+  @@schema("marketplace")
+  FINISHED
+  IN_EXECUTION
+  TESTING
+  IN_DEVELOPMENT
+  IDEA
+}
+
+enum ListingStatus {
+  @@schema("marketplace")
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  SOLD
+  SUSPENDED
+}
+
+enum EvaluationType {
+  @@schema("marketplace")
+  SELF
+  LOCAL_EXPERT
+  CERTIFIED
+}
+
+enum EvaluationColor {
+  @@schema("marketplace")
+  LIGHT_BLUE
+  PURPLE
+  GREEN
+}
+
+model Listing {
+  @@schema("marketplace")
+  id              String   @id @default(cuid())
+  sellerId        String
+  title           String   @db.VarChar(120)
+  description     String   @db.Text
+  category        ListingCategory
+  state           AssetState
+  wilaya          String
+
+  // Financial Data
+  askingPrice     Float
+  initialInvestment Float?
+  revenue         Float?
+  teamSize       Int?
+
+  // Operational Data
+  monthlyCampaigners Int?
+  techStack       Json?     // Array of tech items
+
+  // Media & Documents
+  mediaUrls       Json?     // Array of image/video URLs
+  ownershipDocs   Json?     // Array of document URLs
+  pitchDeckUrl    String?
+  videoUrl        String?
+
+  // Evaluation
+  evaluationType  EvaluationType @default(SELF)
+  evaluationColor EvaluationColor @default(LIGHT_BLUE)
+
+  // Status & Visibility
+  status          ListingStatus @default(DRAFT)
+  isFeatured      Boolean   @default(false)
+  viewCount       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  soldAt          DateTime?
+
+  // Relationships
+  seller          User      @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  evaluations     Evaluation[]
+  favorites       Favorite[]
+  questions       Question[]
+  reports         Report[]
+  transactions    Transaction[]
+
+  @@index([sellerId])
+  @@index([category])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// Evaluations
+// ============================================================================
+
+enum EvaluationStatus {
+  @@schema("marketplace")
+  PENDING_QUOTE
+  QUOTE_SENT
+  PAYMENT_PENDING
+  PAID
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+}
+
+model Evaluation {
+  @@schema("marketplace")
+  id            String   @id @default(cuid())
+  listingId     String
+  evaluatorId   String
+  type          EvaluationType
+  status        EvaluationStatus @default(PENDING_QUOTE)
+
+  // Evaluation Data
+  projectData   Json?     // Raw submission data
+  priceQuote    Float?
+  resultScore   Float?
+  reportUrl     String?
+  evaluationColor EvaluationColor?
+
+  // Timestamps
+  createdAt     DateTime  @default(now())
+  quoteSentAt   DateTime?
+  completedAt   DateTime?
+
+  // Relationships
+  listing       Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  evaluator     User      @relation(fields: [evaluatorId], references: [id])
+
+  @@index([listingId])
+  @@index([evaluatorId])
+  @@index([status])
+}
+
+model EvaluatorReview {
+  @@schema("marketplace")
+  id            String   @id @default(cuid())
+  evaluatorId   String
+  rating        Int       // 1-5
+  comment       String?
+  createdAt     DateTime  @default(now())
+
+  evaluator     User      @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+
+  @@index([evaluatorId])
+}
+
+// ============================================================================
+// Legal Services
+// ============================================================================
+
+enum LegalPartnerType {
+  @@schema("marketplace")
+  NOTARY
+  LAWYER
+}
+
+enum SubscriptionStatus {
+  @@schema("marketplace")
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model NotaryProfile {
+  @@schema("marketplace")
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  officialNumber  String   @unique
+  wilaya          String
+  specialization  String?
+  subscriptionStatus SubscriptionStatus @default(INACTIVE)
+  isVerified      Boolean  @default(false)
+  rating          Float    @default(0)
+  totalTransactions Int    @default(0)
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([wilaya])
+  @@index([isVerified])
+}
+
+model LawyerProfile {
+  @@schema("marketplace")
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  barNumber       String   @unique
+  wilaya          String
+  specialization  String?   // e.g., "corporate", "ip", "litigation"
+  subscriptionStatus SubscriptionStatus @default(INACTIVE)
+  isVerified      Boolean  @default(false)
+  rating          Float    @default(0)
+  totalConsults   Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([wilaya])
+  @@index([specialization])
+  @@index([isVerified])
+}
+
+model EvaluationCompanyProfile {
+  @@schema("marketplace")
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  companyName     String
+  registrationNumber String @unique
+  certificationNumber String @unique
+  subscriptionStatus SubscriptionStatus @default(INACTIVE)
+  isVerified      Boolean  @default(false)
+  rating          Float    @default(0)
+  totalEvaluations Int     @default(0)
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([isVerified])
+}
+
+// ============================================================================
+// Transactions & Payments
+// ============================================================================
+
+enum TransactionStatus {
+  @@schema("marketplace")
+  PENDING
+  ESCROW_HELD
+  PAYMENT_CONFIRMED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+model Transaction {
+  @@schema("marketplace")
+  id              String   @id @default(cuid())
+  listingId       String
+  buyerId         String
+  sellerId        String
+  amount          Float
+  escrowStatus    TransactionStatus @default(PENDING)
+  paymentRef      String?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  listing         Listing  @relation(fields: [listingId], references: [id])
+  buyer           User     @relation("buyer", fields: [buyerId], references: [id])
+  seller          User     @relation("seller", fields: [sellerId], references: [id])
+
+  @@index([listingId])
+  @@index([buyerId])
+  @@index([sellerId])
+}
+
+// ============================================================================
+// Community Features
+// ============================================================================
+
+model Favorite {
+  @@schema("marketplace")
+  id        String   @id @default(cuid())
+  userId    String
+  listingId String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+  @@index([userId])
+}
+
+model Question {
+  @@schema("marketplace")
+  id          String   @id @default(cuid())
+  listingId   String
+  userId      String
+  questionText String
+  answerText  String?
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  answeredAt  DateTime?
+
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([userId])
+}
+
+enum ReportReason {
+  @@schema("marketplace")
+  SPAM
+  FRAUD
+  INAPPROPRIATE_CONTENT
+  FAKE_LISTING
+  COPYRIGHT_ISSUE
+  OTHER
+}
+
+enum ReportStatus {
+  @@schema("marketplace")
+  PENDING
+  INVESTIGATING
+  RESOLVED
+  REJECTED
+}
+
+model Report {
+  @@schema("marketplace")
+  id        String   @id @default(cuid())
+  reporterId String
+  listingId String
+  reason    ReportReason
+  description String?
+  status    ReportStatus @default(PENDING)
+  createdAt DateTime @default(now())
+  resolvedAt DateTime?
+
+  reporter  User     @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([reporterId])
+  @@index([status])
+}
+
+// ============================================================================
+// Email Verification Tokens
+// ============================================================================
+
+model VerificationToken {
+  @@schema("marketplace")
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([token])
+}
+
+model PasswordResetToken {
+  @@schema("marketplace")
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+
